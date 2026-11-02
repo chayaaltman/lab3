@@ -5,6 +5,8 @@ class CoinDash extends Phaser.Scene {
   create() {
     const c = COIN_DASH;
     this.score = 0;
+    this.level = 1;
+    this.droneSpeed = c.droneSpeed;
     this.finished = false;
     this.deadline = this.time.now + c.roundSeconds * 1000;
     this.physics.world.setBounds(0, 44, c.width, c.height - 44);
@@ -20,21 +22,49 @@ class CoinDash extends Phaser.Scene {
     this.placeCoin();
     this.drones = this.physics.add.group();
     for (let i = 0; i < c.droneCount; i++) {
-      const drone = this.add.rectangle(90 + i * 270, 100, 26, 26, c.colors.drone);
-      this.drones.add(drone);
-      drone.body.setCollideWorldBounds(true).setBounce(1, 1);
-      const angle = (35 + i * 105) * Math.PI / 180;
-      drone.body.setVelocity(Math.cos(angle) * c.droneSpeed, Math.sin(angle) * c.droneSpeed);
+      this.addDrone(90 + i * 270, 100, (35 + i * 105) * Math.PI / 180);
     }
+    this.levelText = this.add.text(c.width / 2, c.height / 2 - 60, 'LEVEL UP!',
+      { font: '36px monospace', color: '#ffd166' }).setOrigin(0.5).setVisible(false);
     this.physics.add.overlap(this.player, this.coin, () => {
       if (this.finished) return;
       this.score++;
       this.placeCoin();
+      if (this.score % c.levelUpEvery === 0) this.levelUp();
     });
     this.physics.add.overlap(this.player, this.drones, () => this.finish('A drone caught you!'));
     this.cursors = this.input.keyboard.createCursorKeys();
     this.keys = this.input.keyboard.addKeys('W,A,S,D,R');
     this.input.keyboard.on('keydown-R', () => this.scene.restart());
+  }
+
+  addDrone(x, y, angle) {
+    const drone = this.add.rectangle(x, y, 26, 26, COIN_DASH.colors.drone);
+    this.drones.add(drone);
+    drone.body.setCollideWorldBounds(true).setBounce(1, 1);
+    drone.body.setVelocity(Math.cos(angle) * this.droneSpeed, Math.sin(angle) * this.droneSpeed);
+  }
+
+  levelUp() {
+    const c = COIN_DASH;
+    this.level++;
+    this.droneSpeed *= c.levelSpeedFactor;
+    // Scale each drone's velocity, keeping its current direction.
+    this.drones.getChildren().forEach((drone) => {
+      drone.body.velocity.scale(c.levelSpeedFactor);
+    });
+    if (this.level % c.newDroneEveryLevels === 0 && this.drones.countActive() < c.maxDrones) {
+      // Spawn the new drone well away from the player.
+      let x, y;
+      do {
+        x = Phaser.Math.Between(25, c.width - 25);
+        y = Phaser.Math.Between(70, c.height - 25);
+      } while (Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) < c.droneSpawnMinDistance);
+      this.addDrone(x, y, Phaser.Math.FloatBetween(0, Math.PI * 2));
+    }
+    this.levelText.setVisible(true);
+    if (this.levelTimer) this.levelTimer.remove();
+    this.levelTimer = this.time.delayedCall(1000, () => this.levelText.setVisible(false));
   }
 
   placeCoin() {
@@ -58,7 +88,7 @@ class CoinDash extends Phaser.Scene {
     const direction = new Phaser.Math.Vector2(dx, dy).normalize().scale(COIN_DASH.playerSpeed);
     this.player.body.setVelocity(direction.x, direction.y);
     const seconds = Math.max(0, Math.ceil((this.deadline - this.time.now) / 1000));
-    this.hud.setText(`Coins: ${this.score}                       Time: ${seconds}s`);
+    this.hud.setText(`Coins: ${this.score}      Level: ${this.level}      Time: ${seconds}s`);
     if (seconds === 0) this.finish('Time is up!');
   }
 
