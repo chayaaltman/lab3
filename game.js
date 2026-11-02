@@ -26,6 +26,7 @@ class CoinDash extends Phaser.Scene {
       const angle = (35 + i * 105) * Math.PI / 180;
       drone.body.setVelocity(Math.cos(angle) * c.droneSpeed, Math.sin(angle) * c.droneSpeed);
     }
+    this.createChasers();
     this.physics.add.overlap(this.player, this.coin, () => {
       if (this.finished) return;
       this.score++;
@@ -49,6 +50,40 @@ class CoinDash extends Phaser.Scene {
     this.coin.body.reset(x, y);
   }
 
+  createChasers() {
+    const c = COIN_DASH;
+    // Spawn in the corners farthest from the player so the round never starts on top of one.
+    const corners = [[40, 84], [c.width - 40, 84], [40, c.height - 40], [c.width - 40, c.height - 40]]
+      .sort((a, b) => Phaser.Math.Distance.Between(b[0], b[1], this.player.x, this.player.y)
+        - Phaser.Math.Distance.Between(a[0], a[1], this.player.x, this.player.y));
+    this.chasers = this.physics.add.group();
+    this.chaseStart = this.time.now + c.chaserGraceMs;
+    for (let i = 0; i < c.chaserCount; i++) {
+      const [x, y] = corners[i % corners.length];
+      // Triangle pointing right (rotation 0); rotated toward its velocity in updateChasers().
+      const chaser = this.add.triangle(x, y, 0, 0, 28, 12, 0, 24, c.colors.chaser).setAlpha(0.45);
+      this.chasers.add(chaser);
+      chaser.body.setCircle(11, 3, 1).setCollideWorldBounds(true).setMaxVelocity(c.chaserMaxSpeed);
+    }
+    this.physics.add.overlap(this.player, this.chasers, () => this.finish('The chaser got you!'));
+  }
+
+  updateChasers() {
+    const c = COIN_DASH;
+    const chasing = this.time.now >= this.chaseStart;
+    this.chasers.getChildren().forEach((chaser) => {
+      // Faded and still during the grace period, then accelerate toward the player.
+      const angle = Phaser.Math.Angle.Between(chaser.x, chaser.y, this.player.x, this.player.y);
+      chaser.setAlpha(chasing ? 1 : 0.45);
+      if (!chasing) {
+        chaser.rotation = angle;
+        return;
+      }
+      chaser.body.setAcceleration(Math.cos(angle) * c.chaserAccel, Math.sin(angle) * c.chaserAccel);
+      if (chaser.body.speed > 1) chaser.rotation = Math.atan2(chaser.body.velocity.y, chaser.body.velocity.x);
+    });
+  }
+
   update() {
     if (this.finished) return;
     const dx = Number(this.cursors.right.isDown || this.keys.D.isDown)
@@ -57,6 +92,7 @@ class CoinDash extends Phaser.Scene {
       - Number(this.cursors.up.isDown || this.keys.W.isDown);
     const direction = new Phaser.Math.Vector2(dx, dy).normalize().scale(COIN_DASH.playerSpeed);
     this.player.body.setVelocity(direction.x, direction.y);
+    this.updateChasers();
     const seconds = Math.max(0, Math.ceil((this.deadline - this.time.now) / 1000));
     this.hud.setText(`Coins: ${this.score}                       Time: ${seconds}s`);
     if (seconds === 0) this.finish('Time is up!');
