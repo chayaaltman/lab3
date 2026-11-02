@@ -48,6 +48,7 @@ class CoinDash extends Phaser.Scene {
     }
     this.levelText = this.add.text(c.width / 2, c.height / 2 - 60, 'LEVEL UP!',
       { font: '36px monospace', color: '#ffd166' }).setOrigin(0.5).setVisible(false);
+    this.createChasers();
     this.physics.add.overlap(this.player, this.coin, () => {
       if (this.finished) return;
       this.score++;
@@ -55,6 +56,7 @@ class CoinDash extends Phaser.Scene {
       if (this.score % c.levelUpEvery === 0) this.levelUp();
     });
     this.physics.add.overlap(this.player, this.drones, () => this.finish('A drone caught you!'));
+    this.createDashers();
     this.cursors = this.input.keyboard.createCursorKeys();
     this.keys = this.input.keyboard.addKeys('W,A,S,D,R');
     this.input.keyboard.on('keydown-R', () => this.scene.restart());
@@ -103,6 +105,107 @@ class CoinDash extends Phaser.Scene {
     this.coin.body.reset(x, y);
   }
 
+  createChasers() {
+    const c = COIN_DASH;
+    // Spawn in the corners farthest from the player so the round never starts on top of one.
+    const corners = [[40, 84], [c.width - 40, 84], [40, c.height - 40], [c.width - 40, c.height - 40]]
+      .sort((a, b) => Phaser.Math.Distance.Between(b[0], b[1], this.player.x, this.player.y)
+        - Phaser.Math.Distance.Between(a[0], a[1], this.player.x, this.player.y));
+    this.chasers = this.physics.add.group();
+    this.chaseStart = this.time.now + c.chaserGraceMs;
+    for (let i = 0; i < c.chaserCount; i++) {
+      const [x, y] = corners[i % corners.length];
+      // Triangle pointing right (rotation 0); rotated toward its velocity in updateChasers().
+      const chaser = this.add.triangle(x, y, 0, 0, 28, 12, 0, 24, c.colors.chaser).setAlpha(0.45);
+      this.chasers.add(chaser);
+      chaser.body.setCircle(11, 3, 1).setCollideWorldBounds(true).setMaxSpeed(c.chaserMaxSpeed);
+    }
+    this.physics.add.overlap(this.player, this.chasers, () => this.finish('The chaser got you!'));
+  }
+
+  updateChasers() {
+    const c = COIN_DASH;
+    const chasing = this.time.now >= this.chaseStart;
+    this.chasers.getChildren().forEach((chaser) => {
+      // Faded and still during the grace period, then accelerate toward the player.
+      const angle = Phaser.Math.Angle.Between(chaser.x, chaser.y, this.player.x, this.player.y);
+      chaser.setAlpha(chasing ? 1 : 0.45);
+      if (!chasing) {
+        chaser.rotation = angle;
+        return;
+      }
+      chaser.body.setAcceleration(Math.cos(angle) * c.chaserAccel, Math.sin(angle) * c.chaserAccel);
+      if (chaser.body.speed > 1) chaser.rotation = Math.atan2(chaser.body.velocity.y, chaser.body.velocity.x);
+    });
+  }
+
+  createDashers() {
+    const c = COIN_DASH;
+    this.dashers = this.physics.add.group();
+    this.dasherLines = this.add.graphics();
+    for (let i = 0; i < c.dasherCount; i++) {
+      // Spawn well away from the player's start in the centre.
+      let x, y;
+      do {
+        x = Phaser.Math.Between(25, c.width - 25);
+        y = Phaser.Math.Between(70, c.height - 25);
+      } while (Phaser.Math.Distance.Between(x, y, c.width / 2, c.height / 2) < 200);
+      const dasher = this.add.polygon(x, y, [15, 0, 30, 15, 15, 30, 0, 15], c.colors.dasher);
+      this.dashers.add(dasher);
+      dasher.body.setSize(20, 20).setCollideWorldBounds(true).setBounce(1, 1);
+      this.startWander(dasher); // wander lasts >= 2 s, so the first windup is never earlier
+    }
+    this.physics.add.overlap(this.player, this.dashers, () => this.finish('The dasher rammed you!'));
+  }
+
+  // Dasher state machine: wander -> windup (telegraph) -> dash -> wander.
+  // Driven from update() with scene time, so it freezes when the round finishes.
+  updateDashers() {
+    const c = COIN_DASH;
+    const now = this.time.now;
+    this.dasherLines.clear();
+    this.dashers.getChildren().forEach((d) => {
+      if (d.dashState === 'windup') {
+        // Blink, swell and show the locked target so the player can sidestep.
+        const progress = 1 - (d.stateEnds - now) / c.dasherWindupMs;
+        d.setAlpha(Math.floor(now / 90) % 2 ? 0.35 : 1).setScale(1 + 0.35 * progress);
+        this.dasherLines.lineStyle(2, c.colors.dasher, 0.35)
+          .lineBetween(d.x, d.y, d.targetX, d.targetY);
+      }
+      const hitWall = d.dashState === 'dash' && !d.body.blocked.none;
+      if (now < d.stateEnds && !hitWall) return;
+      if (d.dashState === 'wander') this.startWindup(d);
+      else if (d.dashState === 'windup') this.startDash(d);
+      else this.startWander(d);
+    });
+  }
+
+  startWander(d) {
+    const speed = COIN_DASH.dasherWanderSpeed;
+    const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    d.dashState = 'wander';
+    d.stateEnds = this.time.now + Phaser.Math.Between(2000, 4000);
+    d.setAlpha(1).setScale(1);
+    d.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+  }
+
+  startWindup(d) {
+    d.dashState = 'windup';
+    d.stateEnds = this.time.now + COIN_DASH.dasherWindupMs;
+    d.targetX = this.player.x;
+    d.targetY = this.player.y;
+    d.body.setVelocity(0, 0);
+  }
+
+  startDash(d) {
+    // Aim once at the locked target; no re-aiming during the dash.
+    const angle = Phaser.Math.Angle.Between(d.x, d.y, d.targetX, d.targetY);
+    d.dashState = 'dash';
+    d.stateEnds = this.time.now + COIN_DASH.dasherDashMs;
+    d.setAlpha(1).setScale(1);
+    this.physics.velocityFromRotation(angle, COIN_DASH.dasherDashSpeed, d.body.velocity);
+  }
+
   togglePause() {
     if (this.finished) return;
     const c = COIN_DASH;
@@ -118,7 +221,11 @@ class CoinDash extends Phaser.Scene {
     } else {
       this.paused = false;
       // Shift the deadline so the countdown does not advance while paused.
-      this.deadline += this.time.now - this.pausedAt;
+      const pausedFor = this.time.now - this.pausedAt;
+      this.deadline += pausedFor;
+      // Enemy timers use scene time too, so shift them the same amount.
+      this.chaseStart += pausedFor;
+      this.dashers.getChildren().forEach((d) => { d.stateEnds += pausedFor; });
       this.physics.resume();
       this.pauseOverlay.destroy();
       this.pauseOverlay = null;
@@ -133,6 +240,8 @@ class CoinDash extends Phaser.Scene {
       - Number(this.cursors.up.isDown || this.keys.W.isDown);
     const direction = new Phaser.Math.Vector2(dx, dy).normalize().scale(COIN_DASH.playerSpeed);
     this.player.body.setVelocity(direction.x, direction.y);
+    this.updateChasers();
+    this.updateDashers();
     const seconds = Math.max(0, Math.ceil((this.deadline - this.time.now) / 1000));
     this.hud.setText(`Coins: ${this.score}    Level: ${this.level}    Best: ${this.best}    Time: ${seconds}s`);
     if (seconds === 0) this.finish('Time is up!');
