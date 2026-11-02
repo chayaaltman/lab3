@@ -66,8 +66,21 @@ const Sound = {
       case 'levelUp': [523, 659, 784, 1047].forEach((f, i) => this.tone(t + i * 0.09, f, 0.14)); break;
       case 'windup': this.tone(t, 180, 0.25, 'sawtooth', 360); break;
       case 'pause': this.tone(t, 440, 0.1, 'triangle'); break;
-      case 'caught': this.tone(t, 400, 0.6, 'sawtooth', 70); break;
-      case 'timeUp': this.tone(t, 660, 0.18, 'triangle'); this.tone(t + 0.2, 440, 0.35, 'triangle'); break;
+      // Lose: a crash, then a falling "wah wah wah waaah".
+      case 'lose':
+        this.tone(t, 400, 0.35, 'sawtooth', 70);
+        [392, 370, 349].forEach((f, i) => this.tone(t + 0.4 + i * 0.3, f, 0.28, 'triangle'));
+        this.tone(t + 1.3, 330, 0.9, 'triangle', 300);
+        break;
+      // Win: a rising fanfare ending on a long high note.
+      case 'win':
+        [523, 659, 784].forEach((f, i) => this.tone(t + i * 0.12, f, 0.12));
+        this.tone(t + 0.36, 1047, 0.6);
+        break;
+      // New best score: a quick sparkle played on top of the win or lose tune.
+      case 'newBest':
+        [1568, 2093, 2637, 3136].forEach((f, i) => this.tone(t + 1 + i * 0.06, f, 0.1, 'triangle'));
+        break;
     }
   }
 };
@@ -319,7 +332,9 @@ class CoinDash extends Phaser.Scene {
     if (this.finished) return;
     this.finished = true;
     this.physics.pause();
-    Sound.play(reason === 'Time is up!' ? 'timeUp' : 'caught');
+    // Surviving the whole round is a win; being caught by any enemy is a loss.
+    Sound.play(reason === 'Time is up!' ? 'win' : 'lose');
+    if (this.score > this.best) Sound.play('newBest');
     const c = COIN_DASH;
     let bestLine;
     if (this.score > this.best) {
