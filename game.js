@@ -35,6 +35,8 @@ class CoinDash extends Phaser.Scene {
     this.add.grid(c.width / 2, c.height / 2, c.width, c.height, 40, 40,
       c.colors.background, 1, 0x24334b, 0.45);
     this.hud = this.add.text(18, 12, '', { font: '18px monospace', color: '#ffffff' });
+    this.add.text(c.width - 18, 12, 'P: pause', { font: '18px monospace', color: '#8fa3c0' })
+      .setOrigin(1, 0);
     this.player = this.add.rectangle(c.width / 2, c.height / 2, 24, 24, c.colors.player);
     this.physics.add.existing(this.player);
     this.player.body.setCollideWorldBounds(true);
@@ -50,7 +52,7 @@ class CoinDash extends Phaser.Scene {
       { font: '36px monospace', color: '#ffd166' }).setOrigin(0.5).setVisible(false);
     this.createChasers();
     this.physics.add.overlap(this.player, this.coin, () => {
-      if (this.finished) return;
+      if (this.finished || this.paused) return;
       this.score++;
       this.placeCoin();
       if (this.score % c.levelUpEvery === 0) this.levelUp();
@@ -62,6 +64,14 @@ class CoinDash extends Phaser.Scene {
     this.input.keyboard.on('keydown-R', () => this.scene.restart());
     this.input.keyboard.on('keydown-P', () => this.togglePause());
     this.input.keyboard.on('keydown-ESC', () => this.togglePause());
+    // Pause menu, built once and shown/hidden by togglePause().
+    this.pauseInfo = this.add.text(0, 0, '',
+      { font: '24px monospace', color: '#ffffff', align: 'center', lineSpacing: 12 }
+    ).setOrigin(0.5);
+    this.pauseMenu = this.add.container(c.width / 2, c.height / 2, [
+      this.add.rectangle(0, 0, 460, 230, 0x0a1120, 0.95),
+      this.pauseInfo
+    ]).setVisible(false);
   }
 
   addDrone(x, y, angle) {
@@ -91,6 +101,26 @@ class CoinDash extends Phaser.Scene {
     this.levelText.setVisible(true);
     if (this.levelTimer) this.levelTimer.remove();
     this.levelTimer = this.time.delayedCall(1000, () => this.levelText.setVisible(false));
+  }
+
+  togglePause() {
+    if (this.finished) return;
+    this.paused = !this.paused;
+    if (this.paused) {
+      this.pausedAt = this.time.now;
+      this.physics.pause();
+      const seconds = Math.max(0, Math.ceil((this.deadline - this.time.now) / 1000));
+      this.pauseInfo.setText(
+        `PAUSED\nCoins: ${this.score}  Time: ${seconds}s\nP — resume\nR — restart`);
+    } else {
+      // time.now kept running while paused, so push the deadline and enemy timers back by the paused time.
+      const pausedFor = this.time.now - this.pausedAt;
+      this.deadline += pausedFor;
+      this.chaseStart += pausedFor;
+      this.dashers.getChildren().forEach((d) => { d.stateEnds += pausedFor; });
+      this.physics.resume();
+    }
+    this.pauseMenu.setVisible(this.paused);
   }
 
   placeCoin() {
@@ -204,32 +234,6 @@ class CoinDash extends Phaser.Scene {
     d.stateEnds = this.time.now + COIN_DASH.dasherDashMs;
     d.setAlpha(1).setScale(1);
     this.physics.velocityFromRotation(angle, COIN_DASH.dasherDashSpeed, d.body.velocity);
-  }
-
-  togglePause() {
-    if (this.finished) return;
-    const c = COIN_DASH;
-    if (!this.paused) {
-      this.paused = true;
-      this.pausedAt = this.time.now;
-      this.physics.pause();
-      this.pauseOverlay = this.add.container(c.width / 2, c.height / 2, [
-        this.add.rectangle(0, 0, 460, 110, 0x0a1120, 0.8),
-        this.add.text(0, 0, 'PAUSED — press P to resume',
-          { font: '24px monospace', color: '#ffffff', align: 'center' }).setOrigin(0.5)
-      ]);
-    } else {
-      this.paused = false;
-      // Shift the deadline so the countdown does not advance while paused.
-      const pausedFor = this.time.now - this.pausedAt;
-      this.deadline += pausedFor;
-      // Enemy timers use scene time too, so shift them the same amount.
-      this.chaseStart += pausedFor;
-      this.dashers.getChildren().forEach((d) => { d.stateEnds += pausedFor; });
-      this.physics.resume();
-      this.pauseOverlay.destroy();
-      this.pauseOverlay = null;
-    }
   }
 
   update() {
