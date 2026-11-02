@@ -11,5 +11,11 @@ window.COIN_DASH = {
   chaserMaxSpeed: 170,
   chaserAccel: 260,
   chaserGraceMs: 1500,
-  colors: { background: 0x101c31, player: 0x71e8ce, coin: 0xffd166, drone: 0xff657a, chaser: 0xb48cff }
+  // Dasher: wanders, telegraphs, then charges in a straight line.
+  dasherCount: 1,
+  dasherWanderSpeed: 60,
+  dasherDashSpeed: 480, // 2x playerSpeed, so only sidestepping works
+  dasherWindupMs: 700,
+  dasherDashMs: 450,
+  colors: { background: 0x101c31, player: 0x71e8ce, coin: 0xffd166, drone: 0xff657a, chaser: 0xb48cff, dasher: 0xff9f43 }
 };

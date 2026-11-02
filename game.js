@@ -33,6 +33,7 @@ class CoinDash extends Phaser.Scene {
       this.placeCoin();
     });
     this.physics.add.overlap(this.player, this.drones, () => this.finish('A drone caught you!'));
+    this.createDashers();
     this.cursors = this.input.keyboard.createCursorKeys();
     this.keys = this.input.keyboard.addKeys('W,A,S,D,R');
     this.input.keyboard.on('keydown-R', () => this.scene.restart());
@@ -84,6 +85,73 @@ class CoinDash extends Phaser.Scene {
     });
   }
 
+  createDashers() {
+    const c = COIN_DASH;
+    this.dashers = this.physics.add.group();
+    this.dasherLines = this.add.graphics();
+    for (let i = 0; i < c.dasherCount; i++) {
+      // Spawn well away from the player's start in the centre.
+      let x, y;
+      do {
+        x = Phaser.Math.Between(25, c.width - 25);
+        y = Phaser.Math.Between(70, c.height - 25);
+      } while (Phaser.Math.Distance.Between(x, y, c.width / 2, c.height / 2) < 200);
+      const dasher = this.add.polygon(x, y, [15, 0, 30, 15, 15, 30, 0, 15], c.colors.dasher);
+      this.dashers.add(dasher);
+      dasher.body.setSize(20, 20).setCollideWorldBounds(true).setBounce(1, 1);
+      this.startWander(dasher); // wander lasts >= 2 s, so the first windup is never earlier
+    }
+    this.physics.add.overlap(this.player, this.dashers, () => this.finish('The dasher rammed you!'));
+  }
+
+  // Dasher state machine: wander -> windup (telegraph) -> dash -> wander.
+  // Driven from update() with scene time, so it freezes when the round finishes.
+  updateDashers() {
+    const c = COIN_DASH;
+    const now = this.time.now;
+    this.dasherLines.clear();
+    this.dashers.getChildren().forEach((d) => {
+      if (d.dashState === 'windup') {
+        // Blink, swell and show the locked target so the player can sidestep.
+        const progress = 1 - (d.stateEnds - now) / c.dasherWindupMs;
+        d.setAlpha(Math.floor(now / 90) % 2 ? 0.35 : 1).setScale(1 + 0.35 * progress);
+        this.dasherLines.lineStyle(2, c.colors.dasher, 0.35)
+          .lineBetween(d.x, d.y, d.targetX, d.targetY);
+      }
+      const hitWall = d.dashState === 'dash' && !d.body.blocked.none;
+      if (now < d.stateEnds && !hitWall) return;
+      if (d.dashState === 'wander') this.startWindup(d);
+      else if (d.dashState === 'windup') this.startDash(d);
+      else this.startWander(d);
+    });
+  }
+
+  startWander(d) {
+    const speed = COIN_DASH.dasherWanderSpeed;
+    const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    d.dashState = 'wander';
+    d.stateEnds = this.time.now + Phaser.Math.Between(2000, 4000);
+    d.setAlpha(1).setScale(1);
+    d.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+  }
+
+  startWindup(d) {
+    d.dashState = 'windup';
+    d.stateEnds = this.time.now + COIN_DASH.dasherWindupMs;
+    d.targetX = this.player.x;
+    d.targetY = this.player.y;
+    d.body.setVelocity(0, 0);
+  }
+
+  startDash(d) {
+    // Aim once at the locked target; no re-aiming during the dash.
+    const angle = Phaser.Math.Angle.Between(d.x, d.y, d.targetX, d.targetY);
+    d.dashState = 'dash';
+    d.stateEnds = this.time.now + COIN_DASH.dasherDashMs;
+    d.setAlpha(1).setScale(1);
+    this.physics.velocityFromRotation(angle, COIN_DASH.dasherDashSpeed, d.body.velocity);
+  }
+
   update() {
     if (this.finished) return;
     const dx = Number(this.cursors.right.isDown || this.keys.D.isDown)
@@ -93,6 +161,7 @@ class CoinDash extends Phaser.Scene {
     const direction = new Phaser.Math.Vector2(dx, dy).normalize().scale(COIN_DASH.playerSpeed);
     this.player.body.setVelocity(direction.x, direction.y);
     this.updateChasers();
+    this.updateDashers();
     const seconds = Math.max(0, Math.ceil((this.deadline - this.time.now) / 1000));
     this.hud.setText(`Coins: ${this.score}                       Time: ${seconds}s`);
     if (seconds === 0) this.finish('Time is up!');
