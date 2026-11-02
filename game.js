@@ -24,7 +24,10 @@ class CoinDash extends Phaser.Scene {
 
   create() {
     const c = COIN_DASH;
-    this.score = 0;
+    this.score = 0;        // points, including streak bonuses
+    this.coins = 0;        // coins picked up; drives level-ups
+    this.streak = 0;
+    this.lastCoinAt = -Infinity;
     this.best = loadBest();
     this.level = 1;
     this.droneSpeed = c.droneSpeed;
@@ -53,9 +56,7 @@ class CoinDash extends Phaser.Scene {
     this.createChasers();
     this.physics.add.overlap(this.player, this.coin, () => {
       if (this.finished || this.paused) return;
-      this.score++;
-      this.placeCoin();
-      if (this.score % c.levelUpEvery === 0) this.levelUp();
+      this.collectCoin();
     });
     this.physics.add.overlap(this.player, this.drones, () => this.finish('A drone caught you!'));
     this.createDashers();
@@ -72,6 +73,29 @@ class CoinDash extends Phaser.Scene {
       this.add.rectangle(0, 0, 460, 230, 0x0a1120, 0.95),
       this.pauseInfo
     ]).setVisible(false);
+    this.streakPopup = this.add.text(0, 0, '', { font: 'bold 20px monospace', color: '#ffd166' })
+      .setOrigin(0.5).setVisible(false);
+  }
+
+  // Coins grabbed within streakWindowMs of the last one build a streak worth up to streakMaxBonus points each.
+  collectCoin() {
+    const c = COIN_DASH;
+    const now = this.time.now;
+    this.streak = now - this.lastCoinAt <= c.streakWindowMs ? this.streak + 1 : 1;
+    this.lastCoinAt = now;
+    const points = Math.min(this.streak, c.streakMaxBonus);
+    this.score += points;
+    this.coins++;
+    if (points > 1) this.showStreakPopup(points);
+    this.placeCoin();
+    if (this.coins % c.levelUpEvery === 0) this.levelUp();
+  }
+
+  showStreakPopup(points) {
+    const p = this.streakPopup;
+    this.tweens.killTweensOf(p);
+    p.setText(`+${points} STREAK`).setPosition(this.coin.x, this.coin.y - 18).setAlpha(1).setVisible(true);
+    this.tweens.add({ targets: p, y: p.y - 30, alpha: 0, duration: 700, onComplete: () => p.setVisible(false) });
   }
 
   addDrone(x, y, angle) {
@@ -109,16 +133,19 @@ class CoinDash extends Phaser.Scene {
     if (this.paused) {
       this.pausedAt = this.time.now;
       this.physics.pause();
+      this.tweens.pauseAll();
       const seconds = Math.max(0, Math.ceil((this.deadline - this.time.now) / 1000));
       this.pauseInfo.setText(
-        `PAUSED\nCoins: ${this.score}  Time: ${seconds}s\nP — resume\nR — restart`);
+        `PAUSED\nScore: ${this.score}  Time: ${seconds}s\nP — resume\nR — restart`);
     } else {
       // time.now kept running while paused, so push the deadline and enemy timers back by the paused time.
       const pausedFor = this.time.now - this.pausedAt;
       this.deadline += pausedFor;
+      this.lastCoinAt += pausedFor;
       this.chaseStart += pausedFor;
       this.dashers.getChildren().forEach((d) => { d.stateEnds += pausedFor; });
       this.physics.resume();
+      this.tweens.resumeAll();
     }
     this.pauseMenu.setVisible(this.paused);
   }
@@ -246,8 +273,10 @@ class CoinDash extends Phaser.Scene {
     this.player.body.setVelocity(direction.x, direction.y);
     this.updateChasers();
     this.updateDashers();
+    if (this.streak && this.time.now - this.lastCoinAt > COIN_DASH.streakWindowMs) this.streak = 0;
+    const bonus = Math.min(this.streak, COIN_DASH.streakMaxBonus);
     const seconds = Math.max(0, Math.ceil((this.deadline - this.time.now) / 1000));
-    this.hud.setText(`Coins: ${this.score}    Level: ${this.level}    Best: ${this.best}    Time: ${seconds}s`);
+    this.hud.setText(`Score: ${this.score}${bonus > 1 ? ` x${bonus}` : ''}    Level: ${this.level}    Best: ${this.best}    Time: ${seconds}s`);
     if (seconds === 0) this.finish('Time is up!');
   }
 
@@ -266,7 +295,7 @@ class CoinDash extends Phaser.Scene {
     }
     this.add.rectangle(c.width / 2, c.height / 2, 460, 190, 0x0a1120, 0.95);
     this.add.text(c.width / 2, c.height / 2,
-      `${reason}\n${this.score} coins collected\n${bestLine}\nPress R to try again`,
+      `${reason}\n${this.score} points (${this.coins} coins)\n${bestLine}\nPress R to try again`,
       { font: '24px monospace', color: '#ffffff', align: 'center', lineSpacing: 12 }
     ).setOrigin(0.5);
   }
