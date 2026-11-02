@@ -19,6 +19,59 @@ function saveBest(value) {
   }
 }
 
+// Sound effects are synthesised with Web Audio, so there are no audio files to load.
+// The mute choice is remembered across restarts and reloads.
+const MUTE_KEY = 'coinDashMuted';
+const Sound = {
+  ctx: null,
+  muted: (() => { try { return window.localStorage.getItem(MUTE_KEY) === '1'; } catch (e) { return false; } })(),
+
+  // Browsers only allow audio after a user gesture, so this is first called from a key press.
+  ensure() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try { this.ctx = new AC(); } catch (e) { return null; }
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    return this.ctx;
+  },
+
+  toggleMute() {
+    this.muted = !this.muted;
+    try { window.localStorage.setItem(MUTE_KEY, this.muted ? '1' : '0'); } catch (e) { /* not saved */ }
+    return this.muted;
+  },
+
+  // One note: pitch slides from freq to endFreq, volume fades out over dur seconds.
+  tone(at, freq, dur, type = 'square', endFreq = freq) {
+    const ctx = this.ctx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, at);
+    osc.frequency.exponentialRampToValueAtTime(endFreq, at + dur);
+    gain.gain.setValueAtTime(COIN_DASH.soundVolume, at);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(at);
+    osc.stop(at + dur);
+  },
+
+  play(name) {
+    if (this.muted || !this.ensure()) return;
+    const t = this.ctx.currentTime;
+    switch (name) {
+      case 'coin': this.tone(t, 880, 0.08); this.tone(t + 0.07, 1320, 0.12); break;
+      case 'levelUp': [523, 659, 784, 1047].forEach((f, i) => this.tone(t + i * 0.09, f, 0.14)); break;
+      case 'windup': this.tone(t, 180, 0.25, 'sawtooth', 360); break;
+      case 'pause': this.tone(t, 440, 0.1, 'triangle'); break;
+      case 'caught': this.tone(t, 400, 0.6, 'sawtooth', 70); break;
+      case 'timeUp': this.tone(t, 660, 0.18, 'triangle'); this.tone(t + 0.2, 440, 0.35, 'triangle'); break;
+    }
+  }
+};
+
 class CoinDash extends Phaser.Scene {
   constructor() { super('CoinDash'); }
 
@@ -35,8 +88,9 @@ class CoinDash extends Phaser.Scene {
     this.add.grid(c.width / 2, c.height / 2, c.width, c.height, 40, 40,
       c.colors.background, 1, 0x24334b, 0.45);
     this.hud = this.add.text(18, 12, '', { font: '18px monospace', color: '#ffffff' });
-    this.add.text(c.width - 18, 12, 'P: pause', { font: '18px monospace', color: '#8fa3c0' })
+    this.keyHint = this.add.text(c.width - 18, 12, '', { font: '18px monospace', color: '#8fa3c0' })
       .setOrigin(1, 0);
+    this.updateKeyHint();
     this.player = this.add.rectangle(c.width / 2, c.height / 2, 24, 24, c.colors.player);
     this.physics.add.existing(this.player);
     this.player.body.setCollideWorldBounds(true);
@@ -56,6 +110,7 @@ class CoinDash extends Phaser.Scene {
       this.score++;
       this.placeCoin();
       if (this.score % c.levelUpEvery === 0) this.levelUp();
+      else Sound.play('coin');
     });
     this.physics.add.overlap(this.player, this.drones, () => this.finish('A drone caught you!'));
     this.createDashers();
@@ -64,6 +119,8 @@ class CoinDash extends Phaser.Scene {
     this.input.keyboard.on('keydown-R', () => this.scene.restart());
     this.input.keyboard.on('keydown-P', () => this.togglePause());
     this.input.keyboard.on('keydown-ESC', () => this.togglePause());
+    this.input.keyboard.on('keydown-M', () => { Sound.toggleMute(); this.updateKeyHint(); });
+    this.input.keyboard.on('keydown', () => Sound.ensure()); // unlock audio on the first key press
     // Pause menu, built once and shown/hidden by togglePause().
     this.pauseInfo = this.add.text(0, 0, '',
       { font: '24px monospace', color: '#ffffff', align: 'center', lineSpacing: 12 }
@@ -81,9 +138,14 @@ class CoinDash extends Phaser.Scene {
     drone.body.setVelocity(Math.cos(angle) * this.droneSpeed, Math.sin(angle) * this.droneSpeed);
   }
 
+  updateKeyHint() {
+    this.keyHint.setText(`M: sound ${Sound.muted ? 'off' : 'on'}   P: pause`);
+  }
+
   levelUp() {
     const c = COIN_DASH;
     this.level++;
+    Sound.play('levelUp');
     this.droneSpeed *= c.levelSpeedFactor;
     // Scale each drone's velocity, keeping its current direction.
     this.drones.getChildren().forEach((drone) => {
@@ -106,6 +168,7 @@ class CoinDash extends Phaser.Scene {
   togglePause() {
     if (this.finished) return;
     this.paused = !this.paused;
+    Sound.play('pause');
     if (this.paused) {
       this.pausedAt = this.time.now;
       this.physics.pause();
@@ -225,6 +288,7 @@ class CoinDash extends Phaser.Scene {
     d.targetX = this.player.x;
     d.targetY = this.player.y;
     d.body.setVelocity(0, 0);
+    Sound.play('windup');
   }
 
   startDash(d) {
@@ -255,6 +319,7 @@ class CoinDash extends Phaser.Scene {
     if (this.finished) return;
     this.finished = true;
     this.physics.pause();
+    Sound.play(reason === 'Time is up!' ? 'timeUp' : 'caught');
     const c = COIN_DASH;
     let bestLine;
     if (this.score > this.best) {

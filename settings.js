@@ -22,5 +22,6 @@ window.COIN_DASH = {
   dasherDashSpeed: 480, // 2x playerSpeed, so only sidestepping works
   dasherWindupMs: 700,
   dasherDashMs: 450,
+  soundVolume: 0.08, // 0..1, peak loudness of each sound effect
   colors: { background: 0x101c31, player: 0x71e8ce, coin: 0xffd166, drone: 0xff657a, chaser: 0xb48cff, dasher: 0xff9f43 }
 };
