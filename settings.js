@@ -11,6 +11,9 @@ window.COIN_DASH = {
   newDroneEveryLevels: 2, // spawn an extra drone every N levels
   maxDrones: 7,
   droneSpawnMinDistance: 150,
+  // Coin streak: quick pickups in a row are worth more points.
+  streakWindowMs: 2500, // max gap between coins to keep the streak
+  streakMaxBonus: 3,    // a coin is worth at most this many points
   // Chaser: steers toward the player, capped below playerSpeed so it can be juked.
   chaserCount: 1,
   chaserMaxSpeed: 170,
