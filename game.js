@@ -63,7 +63,7 @@ class CoinDash extends Phaser.Scene {
       // Triangle pointing right (rotation 0); rotated toward its velocity in updateChasers().
       const chaser = this.add.triangle(x, y, 0, 0, 28, 12, 0, 24, c.colors.chaser).setAlpha(0.45);
       this.chasers.add(chaser);
-      chaser.body.setCircle(11, 3, 1).setCollideWorldBounds(true).setMaxVelocity(c.chaserMaxSpeed);
+      chaser.body.setCircle(11, 3, 1).setCollideWorldBounds(true).setMaxSpeed(c.chaserMaxSpeed);
     }
     this.physics.add.overlap(this.player, this.chasers, () => this.finish('The chaser got you!'));
   }
